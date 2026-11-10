@@ -1,15 +1,18 @@
 /* ============================================================
    BOONDI — shared state, API client, helpers
    ============================================================ */
+console.log("[BOONDI] shared.js loading…");
+
 (function () {
   "use strict";
+  try {
 
   var PACKET_G   = 150;
   var SHELF_DAYS = 30;
   var RATE       = 250;
   var CUR        = "Rs.";
 
-  /* 🔑 CONFIG — paste your deployment URL and secret here */
+  /* 🔑 CONFIG — replace these two lines with your real values */
   var API_URL = "https://script.google.com/macros/s/AKfycbyMphLZoy0P43BihVgzu-pmZ9QrYsX6roQosX_3GJW14KfcfdeS1_odaNxhJtMzJKz5/exec";
   var API_KEY = "sk_sweetops_8f3a1c9e2b7d4f6a";
 
@@ -44,7 +47,6 @@
     return '<svg viewBox="0 0 24 24" width="' + size + '" height="' + size + '" fill="currentColor" aria-hidden="true">' + (ICON[name] || "") + "</svg>";
   }
 
-  /* brand logo SVG — five circles = boondi */
   function brandLogo(size) {
     size = size || 38;
     return '<svg viewBox="0 0 24 24" width="' + Math.round(size*0.55) + '" height="' + Math.round(size*0.55) + '" fill="currentColor" aria-hidden="true">' +
@@ -54,7 +56,6 @@
     '</svg>';
   }
 
-  /* ---------- users ---------- */
   var USERS = [
     { id: "u1", name: "Pasan",    role: "supplier",    password: "pasan123" },
     { id: "u2", name: "Kalsara",  role: "supplier",    password: "kalsara123" },
@@ -65,7 +66,8 @@
 
   /* ---------- API ---------- */
   function apiGet(action) {
-    return fetch(API_URL + "?key=" + encodeURIComponent(API_KEY) + "&action=" + action)
+    var url = API_URL + "?key=" + encodeURIComponent(API_KEY) + "&action=" + action;
+    return fetch(url)
       .then(function (r) { return r.json(); })
       .then(function (j) {
         if (!j.ok) throw new Error(j.error || "API error");
@@ -73,9 +75,6 @@
       });
   }
 
-  /* POST — key is passed BOTH in the URL and the body.
-     The URL copy is what Code.gs's checkKey() reads via e.parameter.key,
-     so this must stay even if the body already has the key. */
   function apiPost(action, payload) {
     var url = API_URL + "?key=" + encodeURIComponent(API_KEY);
     return fetch(url, {
@@ -148,7 +147,6 @@
     setTimeout(function () { window.location.href = "index.html"; }, 180);
   }
 
-  /* ---------- labels ---------- */
   function roleLabel(r) { return r === "supplier" ? "Supplier" : r === "stockkeeper" ? "Stock Keeper" : "Seller"; }
   function avClass(r)   { return r === "supplier" ? "sup" : r === "stockkeeper" ? "stk" : "sel"; }
 
@@ -179,7 +177,6 @@
     var profit  = revenue - cogs;
     var cpp = packetsMade ? (kgPacked * avgCostKg) / packetsMade : 0;
 
-    /* loss per intake */
     var intakes = conf(s.purchases).sort(function (a, b) { return new Date(a.date) - new Date(b.date); });
     var runs = conf(s.packaging).sort(function (a, b) { return new Date(a.date) - new Date(b.date); });
     var losses = [];
@@ -233,7 +230,6 @@
     };
   }
 
-  /* ---------- permissions ---------- */
   function canConfirm(kind, createdBy, me) {
     if (!me || createdBy === me.name) return false;
     if (kind === "purchase")  return me.role === "stockkeeper";
@@ -291,10 +287,9 @@
     return null;
   }
 
-  /* ---------- mutations ---------- */
   function log(who, kind, text) {
     var entry = { at: new Date().toISOString(), who: who, kind: kind, text: text };
-    apiPost("logActivity", entry).catch(function (e) { console.warn("activity log failed", e); });
+    apiPost("logActivity", entry).catch(function (e) { console.warn("[BOONDI] activity log failed", e); });
     getState().activity.unshift(entry);
   }
 
@@ -348,7 +343,6 @@
     });
   }
 
-  /* ---------- toast ---------- */
   function toast(msg) {
     var el = document.getElementById("snackbar");
     if (!el) return;
@@ -358,7 +352,6 @@
     el._t = setTimeout(function () { el.classList.remove("show"); }, 2800);
   }
 
-  /* ---------- navigation ---------- */
   var PAGE = "";
   function setPage(p) { PAGE = p; }
   function isPage(p) { return PAGE === p; }
@@ -399,7 +392,6 @@
       '</div></div>';
   }
 
-  /* ---------- confirm modal ---------- */
   var modal = { item: null, step: 1, queue: [], onDone: null };
 
   function showConfirmModal(kind, id, onDone) {
@@ -407,10 +399,7 @@
     var it = itemOf(kind, id);
     if (!it) return;
     if (!canConfirm(kind, it.createdBy, me)) return toast("You cannot confirm this entry");
-    modal.item = it;
-    modal.step = 1;
-    modal.queue = [];
-    modal.onDone = onDone;
+    modal.item = it; modal.step = 1; modal.queue = []; modal.onDone = onDone;
     renderModal();
   }
 
@@ -418,8 +407,7 @@
     var me = getUser();
     var q = pendingForUser(me);
     if (!q.length) return toast("Nothing waiting for you");
-    modal.queue = q.slice();
-    modal.onDone = onDone;
+    modal.queue = q.slice(); modal.onDone = onDone;
     advanceModal();
   }
 
@@ -432,8 +420,7 @@
     }
     var it = itemOf(next.kind, next.id);
     if (!it) return advanceModal();
-    modal.item = it;
-    modal.step = 1;
+    modal.item = it; modal.step = 1;
     renderModal();
   }
 
@@ -441,11 +428,9 @@
     var existing = document.querySelector(".scrim");
     if (existing) existing.remove();
     if (!modal.item) return;
-
     var it = modal.item;
     var scrim = document.createElement("div");
     scrim.className = "scrim";
-
     if (modal.step === 1) {
       var rows = it.rows.map(function (r) {
         return '<div style="display:flex;justify-content:space-between;gap:12px">' +
@@ -473,14 +458,11 @@
   }
 
   function closeModal() {
-    modal.item = null;
-    modal.step = 1;
-    modal.queue = [];
+    modal.item = null; modal.step = 1; modal.queue = [];
     var s = document.querySelector(".scrim");
     if (s) s.remove();
   }
 
-  /* ---------- one delegated listener for chrome + modal ---------- */
   document.addEventListener("click", function (e) {
     var el = e.target;
     while (el && el !== document) {
@@ -511,7 +493,6 @@
     }
   });
 
-  /* ---------- expose ---------- */
   window.SweetOps = {
     PACKET_G: PACKET_G, SHELF_DAYS: SHELF_DAYS, RATE: RATE, CUR: CUR,
     users: USERS,
@@ -544,4 +525,18 @@
     closeModal: closeModal
   };
   window.A = window.SweetOps;
+
+  console.log("[BOONDI] shared.js loaded OK ✓", { hasSweetOps: !!window.SweetOps });
+
+  } catch (err) {
+    console.error("[BOONDI] shared.js CRASHED:", err);
+    document.body.innerHTML =
+      '<div style="padding:32px;font-family:system-ui,sans-serif;max-width:720px;margin:0 auto">' +
+        '<h2 style="color:#b91c1c;margin:0 0 12px">BOONDI failed to load</h2>' +
+        '<p style="color:#666;margin:0 0 16px">There is a bug in <b>shared.js</b>. Open the browser console (F12) for the full trace, or read the error below.</p>' +
+        '<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:16px;font-family:monospace;font-size:12px;color:#7f1d1d;white-space:pre-wrap;overflow:auto;max-height:400px">' +
+          (err.message || err) + '\n\n' + (err.stack || '') +
+        '</div>' +
+      '</div>';
+  }
 })();
