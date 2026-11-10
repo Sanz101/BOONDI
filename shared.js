@@ -1,5 +1,5 @@
 /* ============================================================
-   BOONDI — shared.js
+   BOONDI — shared.js  (with background preload)
    ============================================================ */
 console.log("[BOONDI] shared.js loading");
 (function () {
@@ -14,14 +14,18 @@ console.log("[BOONDI] shared.js loading");
   var API_URL = "https://script.google.com/macros/s/AKfycbyMphLZoy0P43BihVgzu-pmZ9QrYsX6roQosX_3GJW14KfcfdeS1_odaNxhJtMzJKz5/exec";
   var API_KEY = "sk_sweetops_8f3a1c9e2b7d4f6a";
 
-  var CACHE_KEY      = "boondi_cache_v6";
-  var CACHE_TIME_KEY = "boondi_cache_time_v6";
+  var CACHE_KEY      = "boondi_cache_v7";
+  var CACHE_TIME_KEY = "boondi_cache_time_v7";
   var CACHE_MAX_AGE  = 10 * 60 * 1000;
   var REFRESH_DELAY  = 300;
 
   var CACHE = null;
   var currentUserId = null;
   var _refreshListeners = [];
+
+  /* ---------- preload state ---------- */
+  var _preloading = false;
+  var _preloadPromise = null;
 
   /* ---------- helpers ---------- */
   function dAgo(n){ var d=new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate()-n); return d; }
@@ -134,19 +138,70 @@ console.log("[BOONDI] shared.js loading");
     return CACHE;
   }
   function fetchFresh(){ return apiGet("getAll","&fresh=1&t="+Date.now()).then(_apply); }
+
+  /* ============================================================
+     PRELOAD — fetch data BEFORE the user logs in.
+     Call this from index.html on page load. Runs in background,
+     never blocks the UI. When the user logs in, the cache is
+     already fresh and every page renders instantly.
+     ============================================================ */
+  function preload(){
+    // Already running? Return the same promise.
+    if (_preloading && _preloadPromise) return _preloadPromise;
+
+    // Cache is already very fresh (under half the max age)?
+    // Don't waste bandwidth — just resolve.
+    var cached = _read();
+    if (cached && cached.age < CACHE_MAX_AGE * 0.5){
+      if (!CACHE) CACHE = cached.data;
+      return Promise.resolve(CACHE);
+    }
+
+    _preloading = true;
+    _preloadPromise = fetchFresh().then(function(c){
+      _preloading = false;
+      _fire();
+      console.log("[BOONDI] preload complete", c);
+      return c;
+    }).catch(function(err){
+      _preloading = false;
+      console.warn("[BOONDI] preload failed:", err.message);
+      return null;
+    });
+    return _preloadPromise;
+  }
+
+  /* ---------- loadAll ---------- */
   function loadAll(opts){
     opts = opts || {};
     if (opts.fresh) return fetchFresh();
+
+    // If a preload is in flight, wait for the SAME request
+    // instead of firing a second one.
+    if (_preloading && _preloadPromise){
+      return _preloadPromise.then(function(){
+        var cached = _read();
+        if (cached && cached.age < CACHE_MAX_AGE){
+          CACHE = cached.data;
+          return CACHE;
+        }
+        return fetchFresh();
+      });
+    }
+
     var cached = _read();
     if (cached && cached.age < CACHE_MAX_AGE){
       CACHE = cached.data;
+      // background refresh so the page updates silently
       setTimeout(function(){
         fetchFresh().then(_fire).catch(function(e){ console.warn("[BOONDI] bg refresh", e.message); });
       }, REFRESH_DELAY);
       return Promise.resolve(CACHE);
     }
+
     return fetchFresh();
   }
+
   function getState(){ return CACHE || { purchases:[], packaging:[], transfers:[], sales:[], activity:[] }; }
   function refresh(){ return fetchFresh().then(function(){ _fire(); return CACHE; }); }
 
@@ -584,25 +639,18 @@ console.log("[BOONDI] shared.js loading");
     setTimeout(function(){ window.location.href = p + ".html"; }, 140);
   }
 
-  /* ============================================================
-     APPBAR — brand · centered nav pill · actions
-     (nav pill visible only on desktop via CSS)
-     ============================================================ */
   function appBar(me){
     var pending = pendingForUser(me);
     var home = roleHome(me);
-
     var items = [
       { id:home,       label:"Home",     icon:"home" },
       { id:"reports",  label:"Reports",  icon:"chart" },
       { id:"activity", label:"Activity", icon:"history", badge:pending.length }
     ];
-
     var navButtons = items.map(function(it){
       var on = isPage(it.id);
       return '<button class="appbar-nav-btn '+(on?'on':'')+'" data-nav="'+it.id+'">' +
-        icon(it.icon, 15) +
-        '<span>'+it.label+'</span>' +
+        icon(it.icon, 15) + '<span>'+it.label+'</span>' +
         (it.badge ? '<span class="appbar-nav-badge">'+it.badge+'</span>' : '') +
       '</button>';
     }).join('');
@@ -627,7 +675,6 @@ console.log("[BOONDI] shared.js loading");
     '</div></header>';
   }
 
-  /* ---------- mobile dock (bottom) ---------- */
   function dock(me, pendingCount){
     var home = roleHome(me);
     var items = [
@@ -638,8 +685,7 @@ console.log("[BOONDI] shared.js loading");
     return '<nav class="dock">' + items.map(function(it){
       var on = isPage(it.id);
       return '<button class="dock-btn '+(on?'on':'')+'" data-nav="'+it.id+'">' +
-        icon(it.icon, 17) +
-        '<span>'+it.label+'</span>' +
+        icon(it.icon, 17) + '<span>'+it.label+'</span>' +
         (it.badge ? '<span class="dock-badge">'+it.badge+'</span>' : '') +
       '</button>';
     }).join('') + '</nav>';
@@ -828,6 +874,7 @@ console.log("[BOONDI] shared.js loading");
   window.SweetOps = {
     PACKET_G:PACKET_G, SHELF_DAYS:SHELF_DAYS, RATE:RATE, CUR:CUR,
     users:USERS,
+    preload:preload,
     loadAll:loadAll, refresh:refresh, onRefresh:onRefresh, lastSync:lastSync,
     getState:getState, calc:calc,
     announcements:announcements, announcementsBlock:announcementsBlock,

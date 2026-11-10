@@ -14,17 +14,116 @@
   .boot .mk{width:56px;height:56px;border-radius:50%;background:#222;color:#fff;display:grid;place-items:center;font-size:26px;font-weight:800;font-family:Georgia,serif;margin:0 auto 14px}
   .boot .sp{width:24px;height:24px;border:2px solid #e5e5e5;border-top-color:#222;border-radius:50%;animation:spin .8s linear infinite;margin:20px auto 0}
   @keyframes spin{to{transform:rotate(360deg)}}
+
+  /* subtle sync indicator on login screen */
+  .sync-pill{
+    position:fixed;
+    bottom:calc(20px + env(safe-area-inset-bottom));
+    left:50%; transform:translateX(-50%) translateY(20px);
+    background:rgba(34,34,34,0.9);
+    color:#fff;
+    font-size:11.5px; font-weight:500;
+    padding:8px 14px;
+    border-radius:20px;
+    display:flex; align-items:center; gap:7px;
+    opacity:0; pointer-events:none;
+    transition:opacity .3s ease, transform .3s ease;
+    z-index:50;
+    box-shadow:0 8px 24px -6px rgba(34,34,34,.4);
+  }
+  .sync-pill.show{
+    opacity:1;
+    transform:translateX(-50%) translateY(0);
+  }
+  .sync-pill .dot{
+    width:6px; height:6px;
+    border-radius:50%;
+    background:#fff;
+    animation:dotPulse 1.2s ease-in-out infinite;
+  }
+  .sync-pill.ok .dot{
+    animation:none;
+    background:#8ef0a3;
+  }
+  @keyframes dotPulse{
+    0%, 100% { opacity:.4 }
+    50% { opacity:1 }
+  }
 </style>
 </head>
 <body>
 <div id="app"><div class="boot"><div><div class="mk">b</div><div class="sp"></div></div></div></div>
 <div id="toast" class="toast"></div>
+<div id="syncPill" class="sync-pill"><span class="dot"></span><span id="syncText">Syncing data…</span></div>
 
 <script src="shared.js"></script>
 <script>
 (function(){
   "use strict";
 
+  /* ============================================================
+     PRELOAD — kick off data fetch immediately, before login.
+     This runs while the user sees the login screen. By the time
+     they've typed their password, the cache is fresh and every
+     page opens instantly.
+     ============================================================ */
+  function startPreload(){
+    var pill = document.getElementById("syncPill");
+    var text = document.getElementById("syncText");
+
+    var cached = SweetOps.lastSync ? SweetOps.lastSync() : 0;
+    var cacheAgeMs = cached ? (Date.now() - cached) : Infinity;
+
+    // If cache is already very fresh (< 2 minutes), no need to show indicator
+    if (cacheAgeMs < 2 * 60 * 1000){
+      // Still fire preload (it will short-circuit) but don't show pill
+      SweetOps.preload();
+      return;
+    }
+
+    if (pill) pill.classList.add("show");
+    if (text) text.textContent = "Syncing data…";
+
+    SweetOps.preload().then(function(){
+      if (pill && text){
+        if (SweetOps.lastSync && SweetOps.lastSync()){
+          pill.classList.add("ok");
+          text.textContent = "Data ready";
+          setTimeout(function(){ pill.classList.remove("show"); }, 800);
+        } else {
+          text.textContent = "Using last cache";
+          setTimeout(function(){ pill.classList.remove("show"); }, 1000);
+        }
+      }
+    }).catch(function(){
+      if (pill && text){
+        text.textContent = "Will load on demand";
+        setTimeout(function(){ pill.classList.remove("show"); }, 1200);
+      }
+    });
+  }
+
+  /* ============================================================
+     PREFETCH — pull the HTML pages into the browser cache so
+     navigation to them is instant (no round-trip).
+     ============================================================ */
+  function prefetchPages(){
+    var pages = ["seller","stockkeeper","supplier","reports","activity"];
+    // Delay slightly so the login screen paints first
+    setTimeout(function(){
+      pages.forEach(function(p){
+        var link = document.createElement("link");
+        link.rel = "prefetch";
+        link.href = p + ".html";
+        link.as = "document";
+        document.head.appendChild(link);
+      });
+    }, 60);
+  }
+
+  /* ============================================================
+     AUTO-LOGIN
+     ============================================================ */
   function tryAutoLogin(){
     var saved = SweetOps.getRemember();
     if (!saved || !saved.id || !saved.pw) return false;
@@ -36,6 +135,9 @@
     return true;
   }
 
+  /* ============================================================
+     LANDING
+     ============================================================ */
   function renderLanding(){
     var users = SweetOps.users;
     var rows = users.map(function(u,i){
@@ -63,6 +165,9 @@
       '</div></div>';
   }
 
+  /* ============================================================
+     PASSWORD DIALOG
+     ============================================================ */
   function openPassword(userId){
     var u = SweetOps.users.find(function(x){ return x.id===userId; });
     if (!u) return;
@@ -103,6 +208,7 @@
         else SweetOps.clearRemember();
         SweetOps.setUser(u);
         document.body.classList.add("leaving");
+        // Cache is likely already fresh thanks to preload — navigation will be instant
         setTimeout(function(){ window.location.href = SweetOps.roleHome(u) + ".html"; }, 180);
       } else {
         err.textContent = "Incorrect password.";
@@ -134,7 +240,21 @@
     }
   });
 
-  if (!tryAutoLogin()) renderLanding();
+  /* ============================================================
+     BOOT — preload, prefetch, then render login
+     ============================================================ */
+  function boot(){
+    // 1. Fire off data preload immediately (non-blocking)
+    try { startPreload(); } catch(e){ console.warn("[BOONDI] preload error", e); }
+
+    // 2. Prefetch HTML pages so navigation is instant
+    try { prefetchPages(); } catch(e){}
+
+    // 3. Show login (or auto-login if remembered)
+    if (!tryAutoLogin()) renderLanding();
+  }
+
+  boot();
 })();
 </script>
 </body>
