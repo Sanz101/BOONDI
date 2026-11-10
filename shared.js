@@ -73,12 +73,21 @@
       });
   }
 
-    function apiPost(action, payload) {
-    return fetch(API_URL + "?key=" + encodeURIComponent(API_KEY), {
+  /* POST — key is passed BOTH in the URL and the body.
+     The URL copy is what Code.gs's checkKey() reads via e.parameter.key,
+     so this must stay even if the body already has the key. */
+  function apiPost(action, payload) {
+    var url = API_URL + "?key=" + encodeURIComponent(API_KEY);
+    return fetch(url, {
       method: "POST",
       headers: { "Content-Type": "text/plain;charset=utf-8" },
       body: JSON.stringify({ action: action, payload: payload, key: API_KEY })
     }).then(function (r) { return r.json(); })
+      .then(function (j) {
+        if (!j.ok) throw new Error(j.error || "API error");
+        return j;
+      });
+  }
 
   function loadAll() {
     return apiGet("getAll").then(function (j) {
