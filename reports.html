@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1"/>
+<meta name="theme-color" content="#006A60"/>
+<title>BOONDI — Reports</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="app"></div>
+<div id="snackbar" class="snackbar"></div>
+
+<script src="shared.js"></script>
+<script>
+(function(){
+  "use strict";
+  var me = SweetOps.requireUser();
+  if (!me) return;
+  SweetOps.setPage("reports");
+
+  document.getElementById("app").innerHTML = SweetOps.loadingView();
+
+  SweetOps.loadAll().then(function(){
+    var c = SweetOps.calc();
+    var pending = SweetOps.pendingForUser(me);
+    var share = c.profit / 5;
+
+    var partnerRows = SweetOps.users.map(function(u){
+      return '<div class="row-item">' +
+        '<span class="avatar ' + SweetOps.avClass(u.role) + '" style="width:32px;height:32px;font-size:13px">' + u.name[0] + '</span>' +
+        '<span class="grow"><span class="t1">' + u.name + '</span>' +
+        '<span class="t2">' + SweetOps.roleLabel(u.role) + '</span></span>' +
+        '<span class="amt" style="color:var(--green)">' + SweetOps.money(share) + '</span></div>';
+    }).join("");
+
+    var max = Math.max.apply(null, c.days.map(function(d){ return d.qty; }).concat([1]));
+    var chart = '<div class="chart">' + c.days.map(function(d){
+      return '<div class="bcol"><div class="bv">' + (d.qty || "") + '</div>' +
+        '<div class="bar" style="height:' + Math.max(4, (d.qty / max) * 100) + '%"></div>' +
+        '<div class="bl">' + d.label + '</div></div>';
+    }).join("") + '</div>';
+
+    var lossRows = (c.losses || []).map(function(l){
+      return '<div class="row-item">' +
+        '<span class="grow"><span class="t1">' + l.intakeId + ' · ' + SweetOps.num(l.intakeKg,1) + ' kg from ' + l.supplier + '</span>' +
+        '<span class="t2">' + l.packetsUsed + ' packets (' + SweetOps.num(l.usedKg,2) + ' kg) · ' + SweetOps.fmtDate(l.date) + '</span></span>' +
+        '<span class="chip ' + (l.lossPct > 3 ? "wait" : "ok") + '">' +
+          SweetOps.num(l.lossKg,2) + ' kg · ' + l.lossPct.toFixed(1) + '%</span></div>';
+    }).join("");
+
+    document.getElementById("app").innerHTML =
+      SweetOps.appBar(me, pending.length) +
+      '<main>' +
+        '<div class="page-head"><h1>Reports</h1><p>Profit, loss, demand and forecast</p></div>' +
+        '<div class="grid g4" style="margin-bottom:16px">' +
+          '<div class="card stat hero"><div class="lab">Revenue</div>' +
+            '<div class="val" style="font-size:21px">' + SweetOps.money(c.revenue) + '</div>' +
+            '<div class="sub">' + SweetOps.num(c.packetsSold) + ' packets sold</div></div>' +
+          '<div class="card stat"><div class="lab">Cost of goods</div>' +
+            '<div class="val" style="font-size:21px">' + SweetOps.money(c.cogs) + '</div>' +
+            '<div class="sub">' + SweetOps.money(c.cpp) + ' per packet</div></div>' +
+          '<div class="card stat"><div class="lab">Net profit</div>' +
+            '<div class="val" style="font-size:21px;color:var(--green)">' + SweetOps.money(c.profit) + '</div>' +
+            '<div class="sub">' + (c.revenue ? ((c.profit / c.revenue) * 100).toFixed(1) : "0") + '% margin</div></div>' +
+          '<div class="card stat"><div class="lab">Processing loss</div>' +
+            '<div class="val" style="font-size:21px;color:var(--amber)">' + SweetOps.num(c.lossKg,2) + ' <small>kg</small></div>' +
+            '<div class="sub">≈ ' + SweetOps.money(c.lossKg * c.avgCostKg) + '</div></div>' +
+        '</div>' +
+        '<div class="grid g2" style="margin-bottom:16px">' +
+          '<div class="card"><div class="card-head"><h3>Demand — last 7 days</h3>' +
+            '<span class="muted small">' + SweetOps.num(c.weekSold) + ' packets</span></div>' +
+            '<div class="card-body pad">' + chart +
+              '<p class="small muted" style="margin:10px 0 0">Average ' + c.avgDaily.toFixed(1) + ' packets / day</p></div></div>' +
+          '<div class="card"><div class="card-head"><h3>Forecast</h3></div>' +
+            '<div class="card-body pad" style="display:grid;gap:12px">' +
+              '<div class="calc">Average daily demand: <b>' + c.avgDaily.toFixed(1) + ' packets</b><br>' +
+                'Nishmi cover: <b>' + (c.nishmiDays === Infinity ? "—" : c.nishmiDays.toFixed(1) + " days") + '</b><br>' +
+                'Jennings packets: <b>' + (c.jenningsDays === Infinity ? "—" : c.jenningsDays.toFixed(1) + " days") + '</b><br>' +
+                'Raw kg: <b>' + (c.kgForDay > 0 ? (c.jenningsKg / c.kgForDay).toFixed(1) + " days" : "—") + '</b></div>' +
+              '<div class="alert ' + (c.nishmiDays < 3 ? "danger" : "good") + '">' +
+                '<span class="ic">' + SweetOps.icon(c.nishmiDays < 3 ? "truck" : "check", 20) + '</span>' +
+                '<div><strong>' + (c.nishmiDays < 3 ? "Transfer needed" : "Stock OK") + '</strong>' +
+                (c.nishmiDays < 3
+                  ? "Send at least " + Math.max(0, Math.ceil(c.avgDaily * 3) - c.nishmiPackets) + " packets to Nishmi for 3 days of cover."
+                  : "Nishmi has " + c.nishmiDays.toFixed(1) + " days of cover.") +
+                '</div></div>' +
+              '<div class="alert info"><span class="ic">' + SweetOps.icon("scale", 20) + '</span>' +
+                '<div><strong>Shelf life</strong>Packed batches good for ' + SweetOps.SHELF_DAYS + ' days. Rotate older packets first.</div></div>' +
+            '</div></div>' +
+        '</div>' +
+        '<div class="grid g2" style="margin-bottom:16px">' +
+          '<div class="card"><div class="card-head"><h3>Profit split — 5 partners</h3>' +
+            '<span class="muted small">' + SweetOps.money(c.profit) + '</span></div>' + partnerRows + '</div>' +
+          '<div class="card"><div class="card-head"><h3>Stock position</h3></div>' +
+            '<div style="padding-bottom:6px">' +
+              '<div class="row-item"><span class="feed-ic">' + SweetOps.icon("scale",18) + '</span>' +
+                '<span class="grow"><span class="t1">Jennings · raw</span>' +
+                '<span class="t2">' + SweetOps.num(c.jenningsKg,1) + ' kg</span></span>' +
+                '<span class="amt">' + SweetOps.money(c.jenningsKg * c.avgCostKg) + '</span></div>' +
+              '<div class="row-item"><span class="feed-ic">' + SweetOps.icon("box",18) + '</span>' +
+                '<span class="grow"><span class="t1">Jennings · packets</span>' +
+                '<span class="t2">' + SweetOps.num(c.jenningsPackets) + ' packets</span></span>' +
+                '<span class="amt">' + SweetOps.money(c.jenningsPackets * c.cpp) + '</span></div>' +
+              '<div class="row-item"><span class="feed-ic">' + SweetOps.icon("truck",18) + '</span>' +
+                '<span class="grow"><span class="t1">Nishmi · packets</span>' +
+                '<span class="t2">' + SweetOps.num(c.nishmiPackets) + ' packets</span></span>' +
+                '<span class="amt">' + SweetOps.money(c.nishmiPackets * c.cpp) + '</span></div>' +
+            '</div></div>' +
+        '</div>' +
+        '<div class="card"><div class="card-head"><h3>Loss per intake</h3>' +
+          '<span class="muted small">Packets × 150g vs intake</span></div>' +
+          (lossRows || '<div class="empty">No confirmed intakes yet</div>') +
+        '</div>' +
+      '</main>';
+  }).catch(function(err){
+    document.getElementById("app").innerHTML = SweetOps.errorView(err.message);
+  });
+})();
+</script>
+</body>
+</html>

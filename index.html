@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1"/>
+<meta name="theme-color" content="#006A60"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="default"/>
+<meta name="apple-mobile-web-app-title" content="BOONDI"/>
+<title>BOONDI — Sign in</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="app"></div>
+<div id="snackbar" class="snackbar"></div>
+
+<script src="shared.js"></script>
+<script>
+(function(){
+  "use strict";
+
+  /* ---------- auto-login if remembered ---------- */
+  function tryAutoLogin(){
+    var saved = SweetOps.getRemember();
+    if (!saved || !saved.id || !saved.pw) return false;
+    var u = SweetOps.users.find(function(x){ return x.id === saved.id; });
+    if (!u || u.password !== saved.pw){
+      SweetOps.clearRemember();
+      return false;
+    }
+    document.getElementById("app").innerHTML =
+      '<div class="auto-login">' +
+        '<div class="logo">' + SweetOps.brandLogo(64) + '</div>' +
+        '<p>Welcome back, <b>' + u.name + '</b></p>' +
+        '<div class="spinner"></div>' +
+      '</div>';
+    SweetOps.setUser(u);
+    setTimeout(function(){ window.location.href = "dashboard.html"; }, 500);
+    return true;
+  }
+
+  /* ---------- login screen ---------- */
+  function renderLogin(){
+    var rows = SweetOps.users.map(function(u){
+      return '<button class="user-item" data-login="'+u.id+'">' +
+        '<span class="avatar '+SweetOps.avClass(u.role)+'">'+u.name[0]+'</span>' +
+        '<span style="flex:1"><span class="nm">'+u.name+'</span>' +
+          '<span class="rl">'+SweetOps.roleLabel(u.role)+'</span></span>' +
+        '<span style="color:var(--outline);display:flex">'+SweetOps.icon("chev",20)+'</span>' +
+      '</button>';
+    }).join("");
+
+    document.getElementById("app").innerHTML =
+      '<div class="login"><div class="login-in">' +
+        '<div class="login-brand">' +
+          '<div class="logo">' + SweetOps.brandLogo(64) + '</div>' +
+          '<h1>BOONDI</h1>' +
+          '<p>Jennings → Nishmi · stock, sales &amp; profit</p>' +
+        '</div>' +
+        '<div class="login-card">' +
+          '<div class="cap">Choose your account</div>' +
+          rows +
+        '</div>' +
+        '<p class="login-foot">Secure internal tool for the five partners.</p>' +
+      '</div></div>';
+  }
+
+  /* ---------- password dialog ---------- */
+  function openPasswordDialog(userId){
+    var u = SweetOps.users.find(function(x){ return x.id === userId; });
+    if (!u) return;
+
+    var saved = SweetOps.getRemember();
+    var wasRemembered = saved && saved.id === u.id;
+
+    var scrim = document.createElement("div");
+    scrim.className = "scrim";
+    scrim.innerHTML =
+      '<div class="dialog" role="dialog" aria-modal="true">' +
+        '<div class="dic">' + SweetOps.icon("person",22) + '</div>' +
+        '<h2>Sign in as ' + u.name + '</h2>' +
+        '<p>Enter your password' + (wasRemembered ? ' — you were remembered before' : '') + '.</p>' +
+        '<div class="md-field" style="margin-top:14px">' +
+          '<input id="pw" type="password" placeholder=" " autocomplete="off" inputmode="text">' +
+          '<label>Password</label>' +
+        '</div>' +
+        '<label class="md-check">' +
+          '<input type="checkbox" id="remember" ' + (wasRemembered ? 'checked' : '') + '>' +
+          '<span>Remember me on this device</span>' +
+        '</label>' +
+        '<p id="pw-err" class="small" style="color:var(--error);margin:8px 0 0;min-height:16px"></p>' +
+        '<div class="actions">' +
+          '<button class="md-btn text" data-pw-cancel>Cancel</button>' +
+          '<button class="md-btn filled" data-pw-go="' + u.id + '">Sign in</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(scrim);
+
+    var input = scrim.querySelector("#pw");
+    var rememberBox = scrim.querySelector("#remember");
+    var err = scrim.querySelector("#pw-err");
+
+    setTimeout(function(){ input.focus(); }, 100);
+
+    function tryLogin(){
+      var pw = input.value;
+      if (pw === u.password){
+        if (rememberBox.checked) SweetOps.saveRemember(u, pw);
+        else SweetOps.clearRemember();
+        SweetOps.setUser(u);
+        document.body.classList.add("page-leaving");
+        setTimeout(function(){ window.location.href = "dashboard.html"; }, 200);
+      } else {
+        err.textContent = "Wrong password — try again.";
+        input.value = "";
+        input.focus();
+        scrim.querySelector(".dialog").animate(
+          [{ transform: "translateX(0)" }, { transform: "translateX(-8px)" },
+           { transform: "translateX(8px)" }, { transform: "translateX(0)" }],
+          { duration: 220, easing: "ease-in-out" }
+        );
+      }
+    }
+
+    input.addEventListener("keydown", function(ev){
+      if (ev.key === "Enter"){ ev.preventDefault(); tryLogin(); }
+    });
+    scrim.addEventListener("click", function(ev){
+      if (ev.target === scrim){ scrim.remove(); return; }
+      var b = ev.target.closest ? ev.target.closest("button") : null;
+      if (!b) return;
+      if (b.hasAttribute("data-pw-cancel")){ scrim.remove(); }
+      else if (b.hasAttribute("data-pw-go")){ tryLogin(); }
+    });
+  }
+
+  /* ---------- click delegation ---------- */
+  document.addEventListener("click", function(e){
+    var el = e.target;
+    while (el && el !== document){
+      if (el.matches && el.matches("[data-login]")){
+        openPasswordDialog(el.getAttribute("data-login"));
+        return;
+      }
+      el = el.parentNode;
+    }
+  });
+
+  /* ---------- boot ---------- */
+  if (!tryAutoLogin()) renderLogin();
+})();
+</script>
+</body>
+</html>

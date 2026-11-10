@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1"/>
+<meta name="theme-color" content="#006A60"/>
+<title>BOONDI — Activity</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="app"></div>
+<div id="snackbar" class="snackbar"></div>
+
+<script src="shared.js"></script>
+<script>
+(function(){
+  "use strict";
+  var me = SweetOps.requireUser();
+  if (!me) return;
+  SweetOps.setPage("activity");
+
+  var filter = "mine";
+
+  function render(){
+    var pending = SweetOps.pendingForUser(me);
+    var all = SweetOps.getState().activity;
+    var list = filter === "mine" ? all.filter(function(a){ return a.who === me.name; }) : all;
+
+    var pendingCards = pending.map(function(p){
+      var it = SweetOps.itemOf(p.kind, p.id);
+      if (!it) return "";
+      var rows = it.rows.map(function(r){
+        return '<div><span class="muted">' + r[0] + ':</span> <b>' + r[1] + '</b></div>';
+      }).join("");
+      return '<div class="card" style="margin-bottom:10px">' +
+        '<div class="card-head"><h3 style="display:flex;align-items:center;gap:8px">' +
+          '<span style="display:flex;color:var(--primary)">' + SweetOps.icon(it.icon, 18) + '</span>' + it.title + '</h3>' +
+          '<span class="chip wait">Pending</span></div>' +
+        '<div class="card-body">' +
+          '<div class="calc" style="gap:3px">' + rows + '</div>' +
+          '<div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">' +
+            '<button class="md-btn filled" data-confirm-kind="' + p.kind + '" data-confirm-id="' + p.id + '">' +
+              SweetOps.icon("check", 18) + ' Review &amp; confirm</button>' +
+          '</div></div></div>';
+    }).join("");
+
+    var feed = list.slice(0, 60).map(function(a){
+      var mine = a.who === me.name;
+      var ic = a.kind === "purchase" ? "truck" : a.kind === "packaging" ? "box" : a.kind === "transfer" ? "truck" : "cash";
+      return '<div class="feed-item' + (mine ? " mine" : "") + '">' +
+        '<span class="feed-ic">' + SweetOps.icon(ic, 17) + '</span>' +
+        '<span class="feed-txt">' + a.text + (mine ? '<span class="you-tag">You</span>' : "") +
+        '<span class="feed-time" style="display:block">' + a.who + ' · ' + SweetOps.fmtDT(a.at) + '</span></span></div>';
+    }).join("");
+
+    document.getElementById("app").innerHTML =
+      SweetOps.appBar(me, pending.length) +
+      '<main>' +
+        '<div class="page-head"><h1>Activity</h1><p>Everything that happened, in order.</p></div>' +
+        (pending.length
+          ? '<div style="margin-bottom:18px">' +
+              '<h3 style="font-size:14px;font-weight:500;margin-bottom:10px;color:var(--on-surface-variant)">' +
+              'WAITING FOR YOU (' + pending.length + ')</h3>' + pendingCards +
+            '</div>'
+          : '') +
+        '<div class="filter-row">' +
+          '<button class="fchip ' + (filter === "mine" ? "on" : "") + '" data-filter="mine">My activity</button>' +
+          '<button class="fchip ' + (filter === "all" ? "on" : "") + '" data-filter="all">Everyone</button>' +
+        '</div>' +
+        '<div class="card"><div class="card-head">' +
+          '<h3>' + (filter === "mine" ? "Your actions" : "All actions") + '</h3>' +
+          '<span class="muted small">' + list.length + ' entries</span></div>' +
+          (feed || '<div class="empty"><span class="big">🗂️</span>No activity yet</div>') +
+        '</div>' +
+      '</main>';
+  }
+
+  document.addEventListener("click", function(e){
+    var el = e.target;
+    while (el && el !== document){
+      if (el.matches){
+        if (el.matches("[data-filter]")){
+          filter = el.getAttribute("data-filter");
+          render();
+          return;
+        }
+        if (el.matches("[data-confirm-kind]")){
+          SweetOps.showConfirmModal(
+            el.getAttribute("data-confirm-kind"),
+            el.getAttribute("data-confirm-id"),
+            render
+          );
+          return;
+        }
+      }
+      el = el.parentNode;
+    }
+  });
+
+  document.getElementById("app").innerHTML = SweetOps.loadingView();
+  SweetOps.loadAll().then(render).catch(function(err){
+    document.getElementById("app").innerHTML = SweetOps.errorView(err.message);
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1"/>
+<meta name="theme-color" content="#006A60"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-title" content="BOONDI"/>
+<title>BOONDI — Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="app"></div>
+<div id="snackbar" class="snackbar"></div>
+
+<script src="shared.js"></script>
+<script>
+(function(){
+  "use strict";
+  var me = SweetOps.requireUser();
+  if (!me) return;
+  SweetOps.setPage("dashboard");
+
+  var sellCount = 0;
+
+  function render(){
+    var c = SweetOps.calc();
+    var pending = SweetOps.pendingForUser(me);
+    var body = me.role === "supplier" ? supplierBody(c)
+             : me.role === "stockkeeper" ? keeperBody(c, pending)
+             : sellerBody(c, pending);
+    document.getElementById("app").innerHTML =
+      SweetOps.appBar(me, pending.length) + '<main>' + body + '</main>';
+    if (me.role === "seller") updateSellUI();
+  }
+
+  /* ===================== SUPPLIER ===================== */
+  function supplierBody(c){
+    var s = SweetOps.getState();
+    var mine = s.purchases.filter(function(p){ return p.supplier === me.name; });
+    var confirmed = mine.filter(function(p){ return p.status === "Confirmed"; });
+    var totalKg = confirmed.reduce(function(a,p){ return a + Number(p.kg); }, 0);
+    var totalValue = confirmed.reduce(function(a,p){ return a + Number(p.kg) * Number(p.costPerKg); }, 0);
+    var pendingCount = mine.filter(function(p){ return p.status === "Pending"; }).length;
+
+    var list = mine.slice().reverse().map(function(p){
+      return '<div class="row-item">' +
+        '<span class="feed-ic">' + SweetOps.icon("truck",18) + '</span>' +
+        '<span class="grow"><span class="t1">' + SweetOps.num(p.kg,1) + ' kg · ' + SweetOps.money(p.costPerKg) + '/kg</span>' +
+        '<span class="t2">' + p.id + ' · ' + SweetOps.fmtDate(p.date) + (p.confirmedBy ? ' · confirmed by ' + p.confirmedBy : '') + '</span></span>' +
+        '<span class="chip ' + (p.status === "Confirmed" ? "ok" : "wait") + '">' +
+          (p.status === "Confirmed" ? "Confirmed" : "Pending") + '</span>' +
+      '</div>';
+    }).join("");
+
+    return '<div class="page-head"><h1>Deliveries</h1>' +
+        '<p>Record what you bring to Jennings — a stock keeper confirms it.</p></div>' +
+      '<div class="grid g4" style="margin-bottom:16px">' +
+        '<div class="card stat hero"><div class="lab">Delivered</div>' +
+          '<div class="val">' + SweetOps.num(totalKg,1) + ' <small>kg</small></div>' +
+          '<div class="sub">Confirmed total</div></div>' +
+        '<div class="card stat"><div class="lab">Value supplied</div>' +
+          '<div class="val" style="font-size:20px">' + SweetOps.money(totalValue) + '</div>' +
+          '<div class="sub">' + confirmed.length + ' deliveries</div></div>' +
+        '<div class="card stat"><div class="lab">Awaiting check</div>' +
+          '<div class="val" style="color:var(--amber)">' + pendingCount + '</div>' +
+          '<div class="sub">Stock keeper confirms</div></div>' +
+      '</div>' +
+      '<div class="card" style="margin-bottom:16px">' +
+        '<div class="card-head"><h3>Record a delivery</h3></div>' +
+        '<div class="card-body">' +
+          '<div class="grid g2" style="gap:12px">' +
+            '<div class="md-field"><input id="p-kg" type="number" min="0" step="0.1" placeholder=" " oninput="SweetOps.calcTotal()"><label>Weight received (kg)</label></div>' +
+            '<div class="md-field"><input id="p-cost" type="number" min="0" step="1" placeholder=" " oninput="SweetOps.calcTotal()"><label>Cost per kg (Rs.)</label></div>' +
+          '</div>' +
+          '<div class="calc" id="p-total" style="margin-top:14px">Total delivery value: <b>—</b></div>' +
+          '<div style="margin-top:16px"><button class="md-btn filled btn-block" data-action="addPurchase">' +
+            SweetOps.icon("add",18) + ' Submit delivery</button></div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="card"><div class="card-head"><h3>My deliveries</h3>' +
+        '<span class="muted small">' + mine.length + ' records</span></div>' +
+        '<div style="padding-bottom:6px">' +
+          (list || '<div class="empty"><span class="big">📭</span>No deliveries yet</div>') +
+        '</div></div>';
+  }
+
+  /* ===================== STOCK KEEPER ===================== */
+  function keeperBody(c, pending){
+    var banner = pending.length ?
+      '<div class="alert warn" style="margin-bottom:16px">' +
+        '<span class="ic">' + SweetOps.icon("warn",20) + '</span>' +
+        '<div style="flex:1"><strong>' + pending.length + ' item' + (pending.length > 1 ? 's' : '') + ' waiting for you</strong>' +
+        'Confirm now to keep stock accurate.</div>' +
+        '<button class="md-btn tonal" style="height:34px;padding:0 16px;font-size:13px" data-action="startQueue">Review</button>' +
+      '</div>' : '';
+
+    var s = SweetOps.getState();
+    var recentPack = s.packaging.slice().reverse().slice(0,4).map(function(k){
+      var used = Number(k.packets) * SweetOps.PACKET_G / 1000;
+      return '<div class="row-item">' +
+        '<span class="feed-ic">' + SweetOps.icon("box",18) + '</span>' +
+        '<span class="grow"><span class="t1">' + k.packets + ' packets</span>' +
+        '<span class="t2">' + SweetOps.num(used,2) + ' kg used · ' + k.by + '</span></span>' +
+        '<span class="chip ' + (k.status === "Confirmed" ? "ok" : "wait") + '">' +
+          (k.status === "Confirmed" ? "OK" : "Pending") + '</span>' +
+      '</div>';
+    }).join("");
+
+    var recentTrans = s.transfers.slice().reverse().slice(0,4).map(function(t){
+      return '<div class="row-item">' +
+        '<span class="feed-ic">' + SweetOps.icon("truck",18) + '</span>' +
+        '<span class="grow"><span class="t1">' + t.packets + ' packets → Nishmi</span>' +
+        '<span class="t2">' + t.by + ' · ' + SweetOps.fmtDate(t.date) + '</span></span>' +
+        '<span class="chip ' + (t.status === "Confirmed" ? "ok" : "wait") + '">' +
+          (t.status === "Confirmed" ? "OK" : "Pending") + '</span>' +
+      '</div>';
+    }).join("");
+
+    var lossCard = '';
+    if (c.losses && c.losses.length){
+      var last = c.losses[c.losses.length - 1];
+      lossCard = '<div class="card" style="margin-bottom:16px">' +
+        '<div class="card-head"><h3>Last intake loss</h3>' +
+        '<span class="chip ' + (last.lossPct > 3 ? "wait" : "ok") + '">' +
+          last.lossPct.toFixed(1) + '%</span></div>' +
+        '<div class="card-body pad"><div class="calc">' +
+          'Intake: <b>' + SweetOps.num(last.intakeKg,1) + ' kg</b> from ' + last.supplier + '<br>' +
+          'Packets from it: <b>' + last.packetsUsed + '</b> (' + SweetOps.num(last.usedKg,2) + ' kg)<br>' +
+          'Loss: <b style="color:var(--amber)">' + SweetOps.num(last.lossKg,2) + ' kg</b>' +
+        '</div></div></div>';
+    }
+
+    return '<div class="page-head"><h1>Jennings workspace</h1>' +
+        '<p>Package raw sweets and send packets to Nishmi.</p></div>' +
+      banner +
+      '<div class="grid g4" style="margin-bottom:16px">' +
+        '<div class="card stat hero"><div class="lab">Raw at Jennings</div>' +
+          '<div class="val">' + SweetOps.num(c.jenningsKg,1) + ' <small>kg</small></div>' +
+          '<div class="sub">Ready to pack</div></div>' +
+        '<div class="card stat"><div class="lab">Packets at Jennings</div>' +
+          '<div class="val">' + SweetOps.num(c.jenningsPackets) + '</div>' +
+          '<div class="sub">' + (c.jenningsDays === Infinity ? '—' : c.jenningsDays.toFixed(1) + ' days cover') + '</div></div>' +
+        '<div class="card stat"><div class="lab">Packets at Nishmi</div>' +
+          '<div class="val">' + SweetOps.num(c.nishmiPackets) + '</div>' +
+          '<div class="sub">' + (c.nishmiDays === Infinity ? '—' : c.nishmiDays.toFixed(1) + ' days cover') + '</div></div>' +
+        '<div class="card stat"><div class="lab">Total loss</div>' +
+          '<div class="val" style="color:var(--amber)">' + SweetOps.num(c.lossKg,2) + ' <small>kg</small></div>' +
+          '<div class="sub">≈ ' + SweetOps.money(c.lossKg * c.avgCostKg) + '</div></div>' +
+      '</div>' +
+      lossCard +
+      '<div class="grid g2" style="margin-bottom:16px">' +
+        '<div class="card"><div class="card-head"><h3>Package sweets</h3>' +
+          '<span class="chip info">' + SweetOps.PACKET_G + ' g / packet</span></div>' +
+          '<div class="card-body">' +
+            '<div class="md-field"><input id="k-pkt" type="number" min="0" step="1" placeholder=" " oninput="SweetOps.packCalc()"><label>Packets produced</label></div>' +
+            '<div class="calc" id="k-calc" style="margin-top:14px">' +
+              'Enter packets to see raw used.<br>Each packet = <b>' + SweetOps.PACKET_G + ' g</b>' +
+            '</div>' +
+            '<div style="margin-top:16px"><button class="md-btn filled btn-block" data-action="addPackaging">' +
+              SweetOps.icon("box",18) + ' Record packaging</button></div>' +
+          '</div></div>' +
+        '<div class="card"><div class="card-head"><h3>Transfer to Nishmi</h3></div>' +
+          '<div class="card-body">' +
+            '<div class="md-field"><input id="t-pkt" type="number" min="1" step="1" placeholder=" "><label>Packets to send</label></div>' +
+            '<div class="calc" style="margin-top:14px">Available at Jennings: <b>' + SweetOps.num(c.jenningsPackets) + ' packets</b></div>' +
+            '<div style="margin-top:16px"><button class="md-btn filled btn-block" data-action="addTransfer">' +
+              SweetOps.icon("truck",18) + ' Send to Nishmi</button></div>' +
+            '<p class="small muted" style="margin:12px 0 0">Bura confirms receipt before Nishmi stock increases.</p>' +
+          '</div></div>' +
+      '</div>' +
+      '<div class="grid g2">' +
+        '<div class="card"><div class="card-head"><h3>Recent packaging</h3></div>' +
+          (recentPack || '<div class="empty">No packaging runs yet</div>') + '</div>' +
+        '<div class="card"><div class="card-head"><h3>Recent transfers</h3></div>' +
+          (recentTrans || '<div class="empty">No transfers yet</div>') + '</div>' +
+      '</div>';
+  }
+
+  /* ===================== SELLER ===================== */
+  function sellerBody(c, pending){
+    var banner = pending.length ?
+      '<div class="alert warn" style="margin-bottom:16px">' +
+        '<span class="ic">' + SweetOps.icon("warn",20) + '</span>' +
+        '<div style="flex:1"><strong>' + pending.length + ' transfer' + (pending.length > 1 ? 's' : '') + ' waiting</strong>' +
+        'Confirm what actually arrived at Nishmi.</div>' +
+        '<button class="md-btn tonal" style="height:34px;padding:0 16px;font-size:13px" data-action="startQueue">Review</button>' +
+      '</div>' : '';
+
+    var alerts = [];
+    if (c.nishmiDays < 3 && c.avgDaily > 0){
+      alerts.push({ cls: "danger", title: "Nishmi stock is running low",
+        body: "About " + c.nishmiDays.toFixed(1) + " days left. Ask Jennings to send at least <b>" +
+          Math.max(0, Math.ceil(c.avgDaily * 3) - c.nishmiPackets) + "</b> packets." });
+    }
+    if (c.jenningsPackets < c.avgDaily * 2 && c.avgDaily > 0){
+      alerts.push({ cls: "warn", title: "Jennings packets are low",
+        body: "Only " + c.jenningsPackets + " packets packed. Pack more." });
+    }
+    if (c.jenningsKg < c.kgForDay * 2){
+      alerts.push({ cls: "warn", title: "Raw stock is low",
+        body: "Jennings holds " + SweetOps.num(c.jenningsKg,1) + " kg. Suppliers should deliver soon." });
+    }
+    if (!alerts.length){
+      alerts.push({ cls: "good", title: "All stock levels healthy", body: "Nothing needs attention right now." });
+    }
+
+    var alertHtml = alerts.map(function(a){
+      return '<div class="alert ' + a.cls + '">' +
+        '<span class="ic">' + SweetOps.icon(a.cls === "good" ? "check" : "warn", 20) + '</span>' +
+        '<div><strong>' + a.title + '</strong>' + a.body + '</div></div>';
+    }).join("");
+
+    var recent = SweetOps.getState().sales.slice().reverse().slice(0,5).map(function(s){
+      return '<div class="row-item">' +
+        '<span class="feed-ic">' + SweetOps.icon("cash",18) + '</span>' +
+        '<span class="grow"><span class="t1">' + s.packets + ' packets sold</span>' +
+        '<span class="t2">' + SweetOps.fmtDT(s.date) + ' · ' + s.id + '</span></span>' +
+        '<span class="amt">' + SweetOps.money(s.revenue) + '</span></div>';
+    }).join("");
+
+    return '<div class="page-head"><h1>Nishmi counter</h1>' +
+        '<p>Tap for each packet, hold to record the sale.</p></div>' +
+      banner +
+      '<div class="grid g4" style="margin-bottom:16px">' +
+        '<div class="card stat hero"><div class="lab">Packets at Nishmi</div>' +
+          '<div class="val">' + SweetOps.num(c.nishmiPackets) + '</div>' +
+          '<div class="sub">' + (c.nishmiDays === Infinity ? '—' : c.nishmiDays.toFixed(1) + ' days of demand') + '</div></div>' +
+        '<div class="card stat"><div class="lab">Sold today</div>' +
+          '<div class="val">' + SweetOps.num(todayPackets()) + '</div>' +
+          '<div class="sub">packets</div></div>' +
+        '<div class="card stat"><div class="lab">Revenue today</div>' +
+          '<div class="val" style="font-size:20px;color:var(--green)">' + SweetOps.money(todayRevenue()) + '</div>' +
+          '<div class="sub">' + SweetOps.num(c.packetsSold) + ' sold in total</div></div>' +
+        '<div class="card stat"><div class="lab">Profit to date</div>' +
+          '<div class="val" style="font-size:20px">' + SweetOps.money(c.profit) + '</div>' +
+          '<div class="sub">All partners</div></div>' +
+      '</div>' +
+      '<div class="card" style="margin-bottom:16px">' +
+        '<div class="card-head"><h3>Record a sale</h3>' +
+          '<span class="chip info">' + SweetOps.money(SweetOps.RATE) + ' / packet</span></div>' +
+        '<div class="sell-stage">' +
+          '<button class="sell-fab" id="sellFab" data-sell>' +
+            '<svg class="sell-ring" viewBox="0 0 100 100"><circle cx="50" cy="50" r="47"></circle></svg>' +
+            '<span class="cnt" id="sellCount">0</span>' +
+            '<span class="lbl">packets</span>' +
+          '</button>' +
+        '</div>' +
+        '<div style="padding:0 18px 18px">' +
+          '<div class="calc" style="text-align:center">Sale value: <b id="sellTotal">' + SweetOps.money(0) + '</b></div>' +
+          '<p class="small muted" style="text-align:center;margin:12px 0 0">Tap to add · Hold to record the sale</p>' +
+          '<div style="display:flex;justify-content:center;margin-top:10px">' +
+            '<button class="md-btn text" data-action="clearSell">Clear</button></div>' +
+          (c.nishmiPackets <= 0 ? '<p class="small" style="text-align:center;color:var(--error);margin:6px 0 0">No packets — confirm an incoming transfer first.</p>' : '') +
+        '</div>' +
+      '</div>' +
+      '<div class="grid g2">' +
+        '<div class="card"><div class="card-head"><h3>Needs attention</h3></div>' +
+          '<div class="card-body pad" style="display:grid;gap:10px">' + alertHtml + '</div></div>' +
+        '<div class="card"><div class="card-head"><h3>Recent sales</h3></div>' +
+          (recent || '<div class="empty"><span class="big">🧾</span>No sales yet</div>') + '</div>' +
+      '</div>';
+  }
+
+  function todayPackets(){
+    var k = new Date().toDateString();
+    return SweetOps.getState().sales.filter(function(s){ return new Date(s.date).toDateString() === k; })
+      .reduce(function(a,b){ return a + Number(b.packets); }, 0);
+  }
+  function todayRevenue(){
+    var k = new Date().toDateString();
+    return SweetOps.getState().sales.filter(function(s){ return new Date(s.date).toDateString() === k; })
+      .reduce(function(a,b){ return a + Number(b.revenue); }, 0);
+  }
+
+  /* ---------- helpers ---------- */
+  SweetOps.calcTotal = function(){
+    var kgEl = document.getElementById("p-kg");
+    var costEl = document.getElementById("p-cost");
+    var el = document.getElementById("p-total");
+    if (!el) return;
+    var kg = kgEl ? parseFloat(kgEl.value) || 0 : 0;
+    var cost = costEl ? parseFloat(costEl.value) || 0 : 0;
+    el.innerHTML = "Total delivery value: <b>" + (kg && cost ? SweetOps.money(kg * cost) : "—") + "</b>";
+  };
+
+  SweetOps.packCalc = function(){
+    var el = document.getElementById("k-calc");
+    var input = document.getElementById("k-pkt");
+    if (!el || !input) return;
+    var pkt = parseInt(input.value, 10) || 0;
+    if (!pkt){
+      el.className = "calc";
+      el.innerHTML = "Enter packets to see raw used.<br>Each packet = <b>" + SweetOps.PACKET_G + " g</b>";
+      return;
+    }
+    var used = pkt * SweetOps.PACKET_G / 1000;
+    var available = SweetOps.calc().jenningsKg;
+    var insufficient = used > available;
+    el.className = "calc" + (insufficient ? " bad" : "");
+    el.innerHTML = 'Raw used: <b>' + SweetOps.num(used,2) + ' kg</b><br>' +
+      'Available: <b>' + SweetOps.num(available,2) + ' kg</b>' +
+      (insufficient ? '<br>Not enough raw stock for this run.' : '');
+  };
+
+  /* ---------- sell fab ---------- */
+  function updateSellUI(){
+    var cnt = document.getElementById("sellCount");
+    var tot = document.getElementById("sellTotal");
+    if (cnt) cnt.textContent = sellCount;
+    if (tot) tot.textContent = SweetOps.money(sellCount * SweetOps.RATE);
+  }
+
+  var holdTimer = null;
+  function sellDown(e){
+    if (e) e.preventDefault();
+    var btn = document.getElementById("sellFab");
+    if (!btn) return;
+    try { btn.setPointerCapture(e.pointerId); } catch(_) {}
+    btn.classList.add("holding");
+    holdTimer = setTimeout(function(){
+      holdTimer = null;
+      btn.classList.remove("holding");
+      commitSale();
+    }, 700);
+  }
+  function sellUp(){
+    var btn = document.getElementById("sellFab");
+    if (btn) btn.classList.remove("holding");
+    if (holdTimer){
+      clearTimeout(holdTimer);
+      holdTimer = null;
+      bumpSell(1);
+    }
+  }
+  function sellCancel(){
+    var btn = document.getElementById("sellFab");
+    if (btn) btn.classList.remove("holding");
+    if (holdTimer){ clearTimeout(holdTimer); holdTimer = null; }
+  }
+  function bumpSell(n){
+    var c = SweetOps.calc();
+    if (sellCount + n > c.nishmiPackets) return SweetOps.toast("Not enough packets");
+    sellCount += n;
+    updateSellUI();
+  }
+  function commitSale(){
+    if (!sellCount) return SweetOps.toast("Tap to add packets first");
+    var c = SweetOps.calc();
+    if (sellCount > c.nishmiPackets){ sellCount = 0; updateSellUI(); return SweetOps.toast("Not enough packets"); }
+    var n = sellCount;
+    SweetOps.addSale(me, n, SweetOps.RATE).then(function(){
+      SweetOps.toast("Sale recorded — " + SweetOps.money(n * SweetOps.RATE));
+      sellCount = 0;
+      render();
+    }).catch(function(err){ SweetOps.toast("Failed: " + err.message); });
+  }
+
+  document.addEventListener("pointerdown", function(e){
+    var el = e.target;
+    while (el && el !== document){
+      if (el.matches && el.matches("[data-sell]")){ sellDown(e); return; }
+      el = el.parentNode;
+    }
+  }, { passive: false });
+
+  document.addEventListener("pointerup", function(e){
+    var el = e.target, hit = false;
+    while (el && el !== document){
+      if (el.matches && el.matches("[data-sell]")){ hit = true; break; }
+      el = el.parentNode;
+    }
+    if (hit) sellUp();
+    else if (holdTimer){ clearTimeout(holdTimer); holdTimer = null; sellCancel(); }
+  });
+  document.addEventListener("pointercancel", function(){ sellCancel(); });
+  document.addEventListener("contextmenu", function(e){
+    if (e.target && e.target.closest && e.target.closest("[data-sell]")) e.preventDefault();
+  });
+
+  /* ---------- action buttons ---------- */
+  document.addEventListener("click", function(e){
+    var el = e.target;
+    while (el && el !== document){
+      if (el.matches && el.matches("[data-action]")){
+        var a = el.getAttribute("data-action");
+        if (a === "addPurchase") return doAddPurchase();
+        if (a === "addPackaging") return doAddPackaging();
+        if (a === "addTransfer") return doAddTransfer();
+        if (a === "clearSell"){ sellCount = 0; updateSellUI(); return; }
+        if (a === "startQueue") return SweetOps.showConfirmQueue(render);
+        return;
+      }
+      el = el.parentNode;
+    }
+  });
+
+  function doAddPurchase(){
+    var kg = parseFloat((document.getElementById("p-kg") || {}).value);
+    var cost = parseFloat((document.getElementById("p-cost") || {}).value);
+    if (!(kg > 0) || !(cost > 0)) return SweetOps.toast("Enter a valid weight and cost per kg");
+    SweetOps.addPurchase(me, kg, cost).then(function(){
+      SweetOps.toast("Delivery submitted");
+      render();
+    }).catch(function(err){ SweetOps.toast("Failed: " + err.message); });
+  }
+
+  function doAddPackaging(){
+    var pkt = parseInt((document.getElementById("k-pkt") || {}).value, 10);
+    if (!(pkt > 0)) return SweetOps.toast("Enter how many packets you packed");
+    var c = SweetOps.calc();
+    var used = pkt * SweetOps.PACKET_G / 1000;
+    if (used > c.jenningsKg) return SweetOps.toast("Not enough raw stock for " + pkt + " packets");
+    SweetOps.addPackaging(me, pkt).then(function(){
+      SweetOps.toast(pkt + " packets submitted");
+      render();
+    }).catch(function(err){ SweetOps.toast("Failed: " + err.message); });
+  }
+
+  function doAddTransfer(){
+    var pkt = parseInt((document.getElementById("t-pkt") || {}).value, 10);
+    if (!(pkt > 0)) return SweetOps.toast("Enter a valid packet count");
+    var c = SweetOps.calc();
+    if (pkt > c.jenningsPackets) return SweetOps.toast("Only " + c.jenningsPackets + " packets available");
+    SweetOps.addTransfer(me, pkt).then(function(){
+      SweetOps.toast("Transfer of " + pkt + " packets sent");
+      render();
+    }).catch(function(err){ SweetOps.toast("Failed: " + err.message); });
+  }
+
+  /* ---------- boot ---------- */
+  document.getElementById("app").innerHTML = SweetOps.loadingView();
+  SweetOps.loadAll().then(function(){
+    /* handle ?confirm=kind:id if coming from activity page */
+    var params = new URLSearchParams(location.search);
+    var confirmParam = params.get("confirm");
+    if (confirmParam){
+      var parts = confirmParam.split(":");
+      render();
+      setTimeout(function(){ SweetOps.showConfirmModal(parts[0], parts[1], render); }, 200);
+      return;
+    }
+    /* auto-open pending queue */
+    var q = SweetOps.pendingForUser(me);
+    if (q.length){
+      render();
+      setTimeout(function(){ SweetOps.showConfirmQueue(render); }, 250);
+    } else {
+      render();
+    }
+  }).catch(function(err){
+    document.getElementById("app").innerHTML = SweetOps.errorView(err.message);
+  });
+})();
+</script>
+</body>
+</html>
