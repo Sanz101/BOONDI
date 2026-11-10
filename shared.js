@@ -73,17 +73,12 @@
       });
   }
 
-  function apiPost(action, payload) {
-    return fetch(API_URL, {
+    function apiPost(action, payload) {
+    return fetch(API_URL + "?key=" + encodeURIComponent(API_KEY), {
       method: "POST",
       headers: { "Content-Type": "text/plain;charset=utf-8" },
       body: JSON.stringify({ action: action, payload: payload, key: API_KEY })
     }).then(function (r) { return r.json(); })
-      .then(function (j) {
-        if (!j.ok) throw new Error(j.error || "API error");
-        return j;
-      });
-  }
 
   function loadAll() {
     return apiGet("getAll").then(function (j) {
