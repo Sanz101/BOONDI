@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+<meta name="theme-color" content="#FFFFFF"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-title" content="BOONDI"/>
+<title>BOONDI — Supplier</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="app"></div>
+<div id="toast" class="toast"></div>
+
+<script src="shared.js"></script>
+<script>
+(function(){
+  "use strict";
+  var me = SweetOps.requireUser();
+  if (!me) return;
+  if (me.role !== "supplier"){ window.location.replace(SweetOps.roleHome(me)+".html"); return; }
+  SweetOps.setPage("supplier");
+
+  document.getElementById("app").innerHTML =
+    SweetOps.appBar(me) +
+    '<main>' + SweetOps.loadingView() + '</main>' +
+    SweetOps.dock(me, 0);
+
+  function render(){
+    var c = SweetOps.calc();
+    var pending = SweetOps.pendingForUser(me);
+    var s = SweetOps.getState();
+    var mine = s.purchases.filter(function(p){ return p.supplier===me.name; });
+    var confirmed = mine.filter(function(p){ return p.status==="Confirmed"; });
+    var totalKg = confirmed.reduce(function(a,p){ return a+Number(p.kg); },0);
+    var totalValue = confirmed.reduce(function(a,p){ return a+Number(p.kg)*Number(p.costPerKg); },0);
+    var pendingCount = mine.filter(function(p){ return p.status==="Pending"; }).length;
+
+    var list = mine.slice().reverse().map(function(p){
+      return '<div class="row">' +
+        '<span class="row-ico">'+SweetOps.icon("truck",16)+'</span>' +
+        '<span class="row-grow">' +
+          '<span class="row-t1">'+SweetOps.num(p.kg,1)+' kg · '+SweetOps.money(p.costPerKg)+'/kg</span>' +
+          '<span class="row-t2">'+p.id+' · '+SweetOps.fmtDate(p.date)+(p.confirmedBy?' · ✓ '+p.confirmedBy:'')+'</span>' +
+        '</span>' +
+        '<span class="chip '+(p.status==="Confirmed"?"solid":"hollow")+'">'+
+          (p.status==="Confirmed"?"Confirmed":"Pending")+'</span>' +
+      '</div>';
+    }).join("");
+
+    document.getElementById("app").innerHTML =
+      SweetOps.appBar(me) +
+      '<main>' +
+        '<div class="head"><h1>Good to see you, '+me.name+'</h1>' +
+          '<p>Bring sweets to Jennings. A stock keeper confirms each delivery.</p></div>' +
+
+        '<div class="grid" style="gap:8px;margin-bottom:16px">' +
+          SweetOps.announcementsBlock(me, c) +
+        '</div>' +
+
+        '<div style="margin-bottom:16px">' +
+          '<div style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);margin-bottom:10px">Current stock</div>' +
+          SweetOps.stockStrip(c) +
+        '</div>' +
+
+        '<div class="card" style="margin-bottom:16px">' +
+          '<div class="card-hd"><h3>Record a delivery</h3>' +
+            '<span class="chip hollow">'+SweetOps.num(c.jenningsKg,1)+' kg at Jennings</span></div>' +
+          '<div class="card-bd pad">' +
+            '<div class="grid g2" style="gap:12px">' +
+              '<div class="field"><input id="p-kg" type="number" min="0" step="0.1" placeholder=" " oninput="SweetOps.calcTotal()"><label>Weight (kg)</label></div>' +
+              '<div class="field"><input id="p-cost" type="number" min="0" step="1" placeholder=" " oninput="SweetOps.calcTotal()"><label>Cost per kg (Rs.)</label></div>' +
+            '</div>' +
+            '<div class="note" id="p-total" style="margin-top:14px">Delivery value: <b>—</b></div>' +
+            '<div style="margin-top:16px"><button class="btn btn-solid btn-block btn-lg" data-action="addPurchase">'+
+              SweetOps.icon("add",18)+' Submit delivery</button></div>' +
+          '</div>' +
+        '</div>' +
+
+        '<div class="card" style="margin-bottom:16px"><div class="card-hd"><h3>My deliveries</h3>' +
+          '<span style="font-size:12px;color:var(--ink-3)">'+mine.length+' records</span></div>' +
+          '<div class="rows">'+(list || '<div class="empty">No deliveries yet</div>')+'</div>' +
+        '</div>' +
+
+        '<div class="grid g4">' +
+          '<div class="stat"><div class="lab">Delivered</div>' +
+            '<div class="val">'+SweetOps.num(totalKg,1)+'<small>kg</small></div>' +
+            '<div class="sub">Confirmed total</div></div>' +
+          '<div class="stat"><div class="lab">Value supplied</div>' +
+            '<div class="val" style="font-size:22px">'+SweetOps.money(totalValue)+'</div>' +
+            '<div class="sub">'+confirmed.length+' deliveries</div></div>' +
+          '<div class="stat"><div class="lab">Awaiting</div>' +
+            '<div class="val">'+pendingCount+'</div>' +
+            '<div class="sub">Stock keeper action</div></div>' +
+        '</div>' +
+      '</main>' +
+      SweetOps.dock(me, pending.length);
+
+    SweetOps.animateNumbers();
+  }
+
+  SweetOps.calcTotal = function(){
+    var kg = parseFloat((document.getElementById("p-kg")||{}).value)||0;
+    var cost = parseFloat((document.getElementById("p-cost")||{}).value)||0;
+    var el = document.getElementById("p-total");
+    if (el) el.innerHTML = "Delivery value: <b>" + (kg && cost ? SweetOps.money(kg*cost) : "—") + "</b>";
+  };
+
+  document.addEventListener("click", function(e){
+    var btn = null, el = e.target;
+    while (el && el !== document){
+      if (el.matches && el.matches("[data-action]")){ btn = el; break; }
+      el = el.parentNode;
+    }
+    if (!btn) return;
+    if (btn.getAttribute("data-action")==="addPurchase"){
+      doAdd(btn);
+    }
+  });
+
+  function doAdd(btn){
+    var kg = parseFloat((document.getElementById("p-kg")||{}).value);
+    var cost = parseFloat((document.getElementById("p-cost")||{}).value);
+    if (!(kg>0) || !(cost>0)) return SweetOps.toast("Enter weight and cost");
+    SweetOps.btnBusy(btn, "Submitting…");
+    SweetOps.addPurchase(me, kg, cost).then(function(){
+      SweetOps.btnDone(btn, "Submitted");
+      SweetOps.toast("Delivery submitted");
+      setTimeout(render, 300);
+    }).catch(function(err){
+      SweetOps.btnFail(btn);
+      SweetOps.toast("Failed: "+err.message);
+    });
+  }
+
+  SweetOps.loadAll().then(function(){
+    SweetOps.onRefresh(render);
+    render();
+  }).catch(function(err){
+    document.getElementById("app").innerHTML =
+      SweetOps.appBar(me) + '<main>' + SweetOps.errorView(err.message) + '</main>' + SweetOps.dock(me, 0);
+  });
+})();
+</script>
+</body>
+</html>

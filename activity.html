@@ -2,16 +2,16 @@
 <html lang="en">
 <head>
 <meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1"/>
-<meta name="theme-color" content="#006A60"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+<meta name="theme-color" content="#FFFFFF"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-title" content="BOONDI"/>
 <title>BOONDI — Activity</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 <div id="app"></div>
-<div id="snackbar" class="snackbar"></div>
+<div id="toast" class="toast"></div>
 
 <script src="shared.js"></script>
 <script>
@@ -23,58 +23,95 @@
 
   var filter = "mine";
 
+  document.getElementById("app").innerHTML =
+    SweetOps.appBar(me) +
+    '<main>' + SweetOps.loadingView() + '</main>' +
+    SweetOps.dock(me, 0);
+
+  function groupByDay(items){
+    var groups = {};
+    items.forEach(function(a){
+      var d = new Date(a.at);
+      var k = d.toDateString();
+      if (!groups[k]) groups[k] = { date:d, items:[] };
+      groups[k].items.push(a);
+    });
+    return Object.keys(groups).map(function(k){ return groups[k]; })
+      .sort(function(a,b){ return b.date - a.date; });
+  }
+
   function render(){
     var pending = SweetOps.pendingForUser(me);
     var all = SweetOps.getState().activity;
-    var list = filter === "mine" ? all.filter(function(a){ return a.who === me.name; }) : all;
+    var list = filter==="mine" ? all.filter(function(a){ return a.who===me.name; }) : all;
 
     var pendingCards = pending.map(function(p){
       var it = SweetOps.itemOf(p.kind, p.id);
       if (!it) return "";
       var rows = it.rows.map(function(r){
-        return '<div><span class="muted">' + r[0] + ':</span> <b>' + r[1] + '</b></div>';
+        return '<div><span class="k">'+r[0]+'</span><b>'+r[1]+'</b></div>';
       }).join("");
       return '<div class="card" style="margin-bottom:10px">' +
-        '<div class="card-head"><h3 style="display:flex;align-items:center;gap:8px">' +
-          '<span style="display:flex;color:var(--primary)">' + SweetOps.icon(it.icon, 18) + '</span>' + it.title + '</h3>' +
-          '<span class="chip wait">Pending</span></div>' +
-        '<div class="card-body">' +
-          '<div class="calc" style="gap:3px">' + rows + '</div>' +
-          '<div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">' +
-            '<button class="md-btn filled" data-confirm-kind="' + p.kind + '" data-confirm-id="' + p.id + '">' +
-              SweetOps.icon("check", 18) + ' Review &amp; confirm</button>' +
-          '</div></div></div>';
+        '<div class="card-hd">' +
+          '<h3 style="display:flex;align-items:center;gap:8px">' +
+            '<span style="width:28px;height:28px;border-radius:50%;background:var(--ink);color:#fff;display:grid;place-items:center">'+SweetOps.icon(it.icon,14)+'</span>'+
+            it.title+
+          '</h3>' +
+          '<span class="chip solid">Pending</span>' +
+        '</div>' +
+        '<div class="card-bd">' +
+          '<div class="note" style="gap:4px">'+rows+'</div>' +
+          '<button class="btn btn-solid btn-block" style="margin-top:14px" data-confirm-kind="'+p.kind+'" data-confirm-id="'+p.id+'">'+
+            SweetOps.icon("check",18)+' Review & confirm</button>' +
+        '</div></div>';
     }).join("");
 
-    var feed = list.slice(0, 60).map(function(a){
-      var mine = a.who === me.name;
-      var ic = a.kind === "purchase" ? "truck" : a.kind === "packaging" ? "box" : a.kind === "transfer" ? "truck" : "cash";
-      return '<div class="feed-item' + (mine ? " mine" : "") + '">' +
-        '<span class="feed-ic">' + SweetOps.icon(ic, 17) + '</span>' +
-        '<span class="feed-txt">' + a.text + (mine ? '<span class="you-tag">You</span>' : "") +
-        '<span class="feed-time" style="display:block">' + a.who + ' · ' + SweetOps.fmtDT(a.at) + '</span></span></div>';
+    var groups = groupByDay(list.slice(0, 60));
+    var activityHtml = groups.map(function(g){
+      var dayLabel = SweetOps.fmtDay(g.date.toISOString());
+      var items = g.items.map(function(a){
+        var mine = a.who===me.name;
+        var ic = a.kind==="purchase"?"truck":a.kind==="packaging"?"box":a.kind==="transfer"?"truck":"cash";
+        return '<div class="act-item'+(mine?" mine":"")+'">' +
+          '<div class="act-ic">'+SweetOps.icon(ic,16)+'</div>' +
+          '<div class="act-body">' +
+            '<div class="act-text">'+a.text+(mine?'<span class="tag-you">You</span>':'')+'</div>' +
+            '<div class="act-meta">' +
+              '<span>'+a.who+'</span><span>·</span><span>'+SweetOps.fmtTime(a.at)+'</span>' +
+            '</div>' +
+          '</div>' +
+        '</div>';
+      }).join("");
+      return '<div class="act-day">'+dayLabel+'</div>' +
+        '<div class="act-list">'+items+'</div>';
     }).join("");
 
     document.getElementById("app").innerHTML =
-      SweetOps.appBar(me, pending.length) +
+      SweetOps.appBar(me) +
       '<main>' +
-        '<div class="page-head"><h1>Activity</h1><p>Everything that happened, in order.</p></div>' +
+        '<div class="head"><h1>Activity</h1>' +
+          '<p>Every confirmed action, in order.</p></div>' +
+
         (pending.length
-          ? '<div style="margin-bottom:18px">' +
-              '<h3 style="font-size:14px;font-weight:500;margin-bottom:10px;color:var(--on-surface-variant)">' +
-              'WAITING FOR YOU (' + pending.length + ')</h3>' + pendingCards +
+          ? '<div style="margin-bottom:20px">' +
+              '<div style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);margin-bottom:12px">' +
+                'Waiting for you · '+pending.length+'</div>' +
+              pendingCards +
             '</div>'
           : '') +
-        '<div class="filter-row">' +
-          '<button class="fchip ' + (filter === "mine" ? "on" : "") + '" data-filter="mine">My activity</button>' +
-          '<button class="fchip ' + (filter === "all" ? "on" : "") + '" data-filter="all">Everyone</button>' +
+
+        '<div class="frow">' +
+          '<button class="fchip '+(filter==="mine"?"on":"")+'" data-filter="mine">My activity</button>' +
+          '<button class="fchip '+(filter==="all"?"on":"")+'" data-filter="all">Everyone</button>' +
         '</div>' +
-        '<div class="card"><div class="card-head">' +
-          '<h3>' + (filter === "mine" ? "Your actions" : "All actions") + '</h3>' +
-          '<span class="muted small">' + list.length + ' entries</span></div>' +
-          (feed || '<div class="empty"><span class="big">🗂️</span>No activity yet</div>') +
+
+        '<div class="card">' +
+          '<div class="card-bd tight">' +
+            (activityHtml || '<div class="empty">'+SweetOps.icon("history",36)+'No activity yet</div>') +
+          '</div>' +
         '</div>' +
-      '</main>';
+      '</main>' +
+      SweetOps.dock(me, pending.length);
   }
 
   document.addEventListener("click", function(e){
@@ -82,9 +119,7 @@
     while (el && el !== document){
       if (el.matches){
         if (el.matches("[data-filter]")){
-          filter = el.getAttribute("data-filter");
-          render();
-          return;
+          filter = el.getAttribute("data-filter"); render(); return;
         }
         if (el.matches("[data-confirm-kind]")){
           SweetOps.showConfirmModal(
@@ -99,9 +134,12 @@
     }
   });
 
-  document.getElementById("app").innerHTML = SweetOps.loadingView();
-  SweetOps.loadAll().then(render).catch(function(err){
-    document.getElementById("app").innerHTML = SweetOps.errorView(err.message);
+  SweetOps.loadAll().then(function(){
+    SweetOps.onRefresh(render);
+    render();
+  }).catch(function(err){
+    document.getElementById("app").innerHTML =
+      SweetOps.appBar(me) + '<main>' + SweetOps.errorView(err.message) + '</main>' + SweetOps.dock(me, 0);
   });
 })();
 </script>

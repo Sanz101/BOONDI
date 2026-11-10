@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+<meta name="theme-color" content="#FFFFFF"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-title" content="BOONDI"/>
+<title>BOONDI — Seller</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="app"></div>
+<div id="toast" class="toast"></div>
+
+<script src="shared.js"></script>
+<script>
+(function(){
+  "use strict";
+  var me = SweetOps.requireUser();
+  if (!me) return;
+  if (me.role !== "seller"){ window.location.replace(SweetOps.roleHome(me)+".html"); return; }
+  SweetOps.setPage("seller");
+
+  var sellCount = 0;
+  var holdTimer = null;
+
+  document.getElementById("app").innerHTML =
+    SweetOps.appBar(me) +
+    '<main>' + SweetOps.loadingView() + '</main>' +
+    SweetOps.dock(me, 0);
+
+  function render(){
+    var c = SweetOps.calc();
+    var pending = SweetOps.pendingForUser(me);
+    var recent = SweetOps.getState().sales.slice().reverse().slice(0,6).map(function(s){
+      return '<div class="row">' +
+        '<span class="row-ico">'+SweetOps.icon("cash",16)+'</span>' +
+        '<span class="row-grow"><span class="row-t1">'+s.packets+' packets</span>' +
+        '<span class="row-t2">'+SweetOps.fmtDT(s.date)+'</span></span>' +
+        '<span class="row-amt">'+SweetOps.money(s.revenue)+'</span></div>';
+    }).join("");
+
+    document.getElementById("app").innerHTML =
+      SweetOps.appBar(me) +
+      '<main>' +
+        '<div class="head"><h1>Nishmi counter</h1>' +
+          '<p>Tap for each packet. Hold to record the sale.</p></div>' +
+
+        '<div class="grid" style="gap:8px;margin-bottom:16px">' +
+          SweetOps.announcementsBlock(me, c) +
+        '</div>' +
+
+        '<div style="margin-bottom:16px">' +
+          '<div style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);margin-bottom:10px">Current stock</div>' +
+          SweetOps.stockStrip(c) +
+        '</div>' +
+
+        '<div class="card" style="margin-bottom:16px">' +
+          '<div class="sell-wrap">' +
+            '<button class="sell-btn" id="sellFab" data-sell aria-label="Sell packets">' +
+              '<svg class="sell-ring" viewBox="0 0 100 100"><circle cx="50" cy="50" r="47"></circle></svg>' +
+              '<span class="num" id="sellCount">0</span>' +
+              '<span class="lbl">packets</span>' +
+            '</button>' +
+          '</div>' +
+          '<div class="card-bd">' +
+            '<div class="note" style="text-align:center">Sale value: <b id="sellTotal">'+SweetOps.money(0)+'</b></div>' +
+            '<p style="text-align:center;font-size:12.5px;color:var(--ink-3);margin:12px 0 0">Tap = add one · Hold = record sale</p>' +
+            '<div style="display:flex;gap:10px;margin-top:16px">' +
+              '<button class="btn btn-out btn-block" style="flex:1;min-height:52px" data-action="clearSell">Clear</button>' +
+              '<button class="btn btn-solid btn-block" style="flex:2;min-height:52px" data-action="commitSell">Record sale</button>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+
+        '<div class="grid g4" style="margin-bottom:16px">' +
+          '<div class="stat"><div class="lab">Sold today</div>' +
+            '<div class="val">'+SweetOps.num(todayPackets())+'</div>' +
+            '<div class="sub">'+SweetOps.money(todayRevenue())+'</div></div>' +
+          '<div class="stat"><div class="lab">Profit to date</div>' +
+            '<div class="val" style="font-size:22px">'+SweetOps.money(c.profit)+'</div>' +
+            '<div class="sub">All partners</div></div>' +
+          '<div class="stat"><div class="lab">Avg daily</div>' +
+            '<div class="val">'+c.avgDaily.toFixed(1)+'</div>' +
+            '<div class="sub">packets/day</div></div>' +
+        '</div>' +
+
+        '<div class="card"><div class="card-hd"><h3>Recent sales</h3></div>' +
+          '<div class="rows">'+(recent || '<div class="empty">No sales yet</div>')+'</div></div>' +
+      '</main>' +
+      SweetOps.dock(me, pending.length);
+
+    updateSellUI();
+    SweetOps.animateNumbers();
+  }
+
+  function todayPackets(){
+    var k = new Date().toDateString();
+    return SweetOps.getState().sales.filter(function(s){ return new Date(s.date).toDateString()===k; })
+      .reduce(function(a,b){ return a+Number(b.packets); },0);
+  }
+  function todayRevenue(){
+    var k = new Date().toDateString();
+    return SweetOps.getState().sales.filter(function(s){ return new Date(s.date).toDateString()===k; })
+      .reduce(function(a,b){ return a+Number(b.revenue); },0);
+  }
+
+  function updateSellUI(){
+    var n = document.getElementById("sellCount");
+    var t = document.getElementById("sellTotal");
+    if (n) n.textContent = sellCount;
+    if (t) t.textContent = SweetOps.money(sellCount * SweetOps.RATE);
+  }
+  function bump(n){
+    var c = SweetOps.calc();
+    if (sellCount + n > c.nishmiPackets) return SweetOps.toast("Not enough packets");
+    sellCount += n; updateSellUI();
+  }
+  function commit(triggerBtn){
+    if (!sellCount) return SweetOps.toast("Add packets first");
+    var c = SweetOps.calc();
+    if (sellCount > c.nishmiPackets){ sellCount=0; updateSellUI(); return SweetOps.toast("Not enough packets"); }
+
+    var fab = document.getElementById("sellFab");
+    var n = sellCount;
+
+    // Show spinner on FAB
+    if (fab){
+      fab.classList.add("processing");
+      fab.innerHTML = '<span class="sell-spin"></span>';
+    }
+    // Show spinner on the trigger button too
+    if (triggerBtn) SweetOps.btnBusy(triggerBtn, "Recording…");
+
+    SweetOps.addSale(me, n, SweetOps.RATE).then(function(){
+      SweetOps.toast("Sale recorded — "+SweetOps.money(n*SweetOps.RATE));
+      sellCount = 0;
+      render();
+    }).catch(function(err){
+      SweetOps.toast("Failed: "+err.message);
+      if (triggerBtn) SweetOps.btnFail(triggerBtn);
+      if (fab){
+        fab.classList.remove("processing");
+        fab.innerHTML = '<svg class="sell-ring" viewBox="0 0 100 100"><circle cx="50" cy="50" r="47"></circle></svg>' +
+          '<span class="num" id="sellCount">'+sellCount+'</span>' +
+          '<span class="lbl">packets</span>';
+      }
+    });
+  }
+
+  function sellDown(e){
+    if (e) e.preventDefault();
+    var btn = document.getElementById("sellFab");
+    if (!btn || btn.classList.contains("processing")) return;
+    try { btn.setPointerCapture(e.pointerId); } catch(_){}
+    btn.classList.add("holding");
+    holdTimer = setTimeout(function(){
+      holdTimer = null;
+      btn.classList.remove("holding");
+      commit(null);
+    }, 650);
+  }
+  function sellUp(){
+    var btn = document.getElementById("sellFab");
+    if (btn) btn.classList.remove("holding");
+    if (holdTimer){ clearTimeout(holdTimer); holdTimer = null; bump(1); }
+  }
+  function sellCancel(){
+    var btn = document.getElementById("sellFab");
+    if (btn) btn.classList.remove("holding");
+    if (holdTimer){ clearTimeout(holdTimer); holdTimer = null; }
+  }
+
+  document.addEventListener("pointerdown", function(e){
+    var el = e.target;
+    while (el && el !== document){
+      if (el.matches && el.matches("[data-sell]")) return sellDown(e);
+      el = el.parentNode;
+    }
+  }, { passive:false });
+  document.addEventListener("pointerup", function(e){
+    var el = e.target, hit = false;
+    while (el && el !== document){
+      if (el.matches && el.matches("[data-sell]")){ hit = true; break; }
+      el = el.parentNode;
+    }
+    if (hit) sellUp();
+    else if (holdTimer){ clearTimeout(holdTimer); holdTimer=null; sellCancel(); }
+  });
+  document.addEventListener("pointercancel", sellCancel);
+  document.addEventListener("contextmenu", function(e){
+    if (e.target && e.target.closest && e.target.closest("[data-sell]")) e.preventDefault();
+  });
+
+  document.addEventListener("click", function(e){
+    var btn = null, el = e.target;
+    while (el && el !== document){
+      if (el.matches && el.matches("[data-action]")){ btn = el; break; }
+      el = el.parentNode;
+    }
+    if (!btn) return;
+    var a = btn.getAttribute("data-action");
+    if (a==="clearSell"){ sellCount=0; return updateSellUI(); }
+    if (a==="commitSell") return commit(btn);
+  });
+
+  SweetOps.loadAll().then(function(){
+    SweetOps.onRefresh(render);
+    var q = SweetOps.pendingForUser(me);
+    render();
+    if (q.length) setTimeout(function(){ SweetOps.showConfirmQueue(render); }, 400);
+  }).catch(function(err){
+    document.getElementById("app").innerHTML =
+      SweetOps.appBar(me) + '<main>' + SweetOps.errorView(err.message) + '</main>' + SweetOps.dock(me, 0);
+  });
+})();
+</script>
+</body>
+</html>
